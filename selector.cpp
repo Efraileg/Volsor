@@ -1,7 +1,7 @@
 
 
 #include "selector.h"
-#include "FrameBuilder.h"
+
 
 void selector::mostrarMAC(unsigned char* mac){
         for(int i = 0; i<5; i++){
@@ -41,7 +41,8 @@ void selector::recibirConfirmacion(){
 
         //Espera hasta recibir la confirmación de la otra estación para poder efectuar la comunicación.
         //Posteriormente, almacena la dirección MAC para usarla en los protocolos principales de envio de datos.
-        while(1){
+        bool condition = true;
+        while(condition){
             p = ReceiveFrame(&interfaz);
             data = p.packet;
 
@@ -52,8 +53,7 @@ void selector::recibirConfirmacion(){
                     for(int i = 0; i<6; i++){
                         macActual[i] = *(data+i+6);
                     }
-
-                    break;
+                    condition = false;
                 }
             }
         }       
@@ -70,11 +70,8 @@ void selector::maestro(){
 
         //Construir MAC broadcast
         //Construir trama
-
-        unsigned char MAC_BroadCast[6] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
-        tipo[1] = 0x01;
-        unsigned char* tramaBroad = BuildHeader(interfaz.MACaddr, MAC_BroadCast, tipo);
-        SendFrame(&interfaz, tramaBroad, 0);
+        frameB.asignarTipo(tipo[0], tipo[1]);
+        frameB.enviarBroadcast();
 
         //Metodo recibir confirmación, empleado en la busqueda del esclavo.
         recibirConfirmacion();
@@ -87,23 +84,22 @@ void selector::maestro(){
         char car, *aux;
         int longitud;
         unsigned char* tramaEnviar;
+        unsigned char* tramaRecibida;
         bool salir = false;
         bool recibido = false;
+
         while(!salir){
         
-            while(funcion == 0){
-                funcion = leerTeclaEspecial();
-                if(funcion == 4){
-                    //caracter no válido:
-                    funcion = 0;
-                }
+            while(funcion == 0 || funcion > 3){
+                funcion = lector.funcionEspecial();
                 if(funcion == -1){
                     salir = true;
                 }
-                __fpurge(stdin);
+                
             }
 
             tipo[1] = 0x00;     // Se indica comunicacion normal.
+            frameB.asignarTipo(tipo[0], tipo[1]);
             if(funcion == 1){
                 
                 car = 0;
@@ -111,14 +107,16 @@ void selector::maestro(){
                 //Se espera hasta introducir un ESC, en cuyo caso se regresa al menu.
                 while(car != 27){
                     
-                    aux = recibirTrama(longitud);
+                    tramaRecibida = frameB.comprobarTrama(longitud); //recibirTrama(longitud);
 
-                    mostrarTramas(aux, longitud);
+                    frameB.mostrarTramas((char*)tramaRecibida, longitud);
+                    frameB.limpiarTrama(tramaRecibida);
 
                     if(kbhit()){
                         car = getch();
                         if(car != 27){
-                            EnviarTramas(&car, 1, MAC_esclavo);
+                            unsigned char data = car;
+                            frameB.enviarTrama(&data, 1, MAC_esclavo);
                         }
                     }
                 }
@@ -144,9 +142,9 @@ void selector::maestro(){
                     c = new char[l];
 
                     datosGuardados[i].copy(c, l);
-                    EnviarTramas(c, l, MAC_esclavo);
+                    frameB.enviarTrama((unsigned char*)c, l, MAC_esclavo);
 
-                    delete c;
+                    delete[] c;
                 }
             }
 
@@ -171,23 +169,31 @@ void selector::maestro(){
 
                 while(!recibido){
                     //ENVIAR pregunta ¿Sondeo o Seleccion?
-                    tramaEnviar = construirTramaControl(funcionamiento, ENQ, '0');
-                    EnviarTramas((char*) tramaEnviar, 3, MAC_esclavo);
-                    mostrarTramasControl(tramaEnviar, 0, 0, 'E');
-                    delete tramaEnviar;
+                    tramaEnviar = frameB.tramaControl(funcionamiento, ENQ, '0');    
+                    frameB.enviarTrama(tramaEnviar, 3, MAC_esclavo);
+                    frameB.mostrarTramasControl(tramaEnviar, 0, 0, 'E');
+                    frameB.limpiarTrama(tramaEnviar);
 
                     //ESPERAR RESPUESTA
-                    
-                    while(!recibido){
-                        aux = recibirTrama(longitud);
-                        if(aux != nullptr){
-                            if(*(aux+1) == ACK){
-                                recibido = true;
-                            }
-                            mostrarTramasControl((unsigned char*)aux, 0, 0, 'R');
-                            printf("\n");
-                        }   
+                    tramaRecibida = frameB.esperarTrama(longitud);
+                    if(*(tramaRecibida+1) == ACK){
+                        recibido = true;
+                        //Fallo?
+                        //Reenviar pregunta.
                     }
+                    frameB.mostrarTramasControl(tramaRecibida, 0, 0, 'R');
+                    frameB.limpiarTrama(tramaRecibida);
+                    printf("\n");
+                    //while(!recibido){
+                    //    aux = recibirTrama(longitud);
+                    //    if(aux != nullptr){
+                    //        if(*(aux+1) == ACK){
+                    //            recibido = true;
+                    //        }
+                    //        mostrarTramasControl((unsigned char*)aux, 0, 0, 'R');
+                    //       printf("\n");
+                    //   }   
+                    //}
                 }
 
                 // Metodo encargado de gobernar la comunicación, se encarga tanto de los envios de trama de dato, respuestas de
@@ -223,6 +229,7 @@ void selector::esclavo(){
         tipo[1] = 0x00;
         char car = 'A';
         unsigned char* enviarTramas;
+        unsigned char* tramaRecibida;
         int longitud;
         char* aux;
         int funcionamiento = 0;
@@ -230,19 +237,20 @@ void selector::esclavo(){
 
         //Bucle encargado de gobernar el menu y todas las diferentes opciones, es una modificación del bucle de maestro.
         //pues esclavo necesita estar mostrando todo lo que le llegue independientemente de elegir alguna opción.
+        frameB.asignarTipo(tipo[0], tipo[1]);
         __fpurge(stdin);
         while(!salir){
             
-            aux = recibirTrama(longitud);
-            
-            mostrarTramas(aux, longitud);
+
+            tramaRecibida = frameB.comprobarTrama(longitud);  
+            frameB.mostrarTramas((char*)tramaRecibida, longitud);
+            frameB.limpiarTrama(tramaRecibida);
+           
 
             //Estado base, no se toman opciones del meno
             if(funcionamiento == 0){
-                funcionamiento = leerTeclaEspecial();
-                __fpurge(stdin);
+                funcionamiento = lector.funcionEspecial();
             }
-            
             //F2 y F4 no son validas, F4 solo será válida en el protocolo de paro y espera cuando a esclavo le toque enviar errores.
             if(funcionamiento == 2 || funcionamiento == 4){
                 funcionamiento = 0;
@@ -255,7 +263,8 @@ void selector::esclavo(){
                         if(kbhit()){
                             car = getch();
                             if(car != 27){
-                                EnviarTramas(&car, 1, MAC_maestro);  // La primera MAC que cojo es la origen y a la que tengo que enviar los datos.
+                                unsigned char ucar = car;
+                                frameB.enviarTrama(&ucar, 1, MAC_maestro);  // La primera MAC que cojo es la origen y a la que tengo que enviar los datos.
                             }
                         }   
                     }else{
@@ -278,32 +287,33 @@ void selector::esclavo(){
                 unsigned char devolverControl;
 
                 //Esperar recibir trama maestro y determinar si es tipo R o T
-                while(!recibirControlCorrecta){
+                 while(!recibirControlCorrecta){
 
-                    aux = recibirTrama(longitud);
-                    if(aux != nullptr){
+                    tramaRecibida = frameB.esperarTrama(longitud);
                             
-                            //No es pedido pero podría darse el caso de recibir una ENQ erronea
-                        aceptable = ((*(aux) == 'R' || *(aux) == 'T') && *(aux + 1) == ENQ);
+                    //No es pedido pero podría darse el caso de recibir una ENQ erronea
+                    aceptable = ((*(tramaRecibida) == 'R' || *(tramaRecibida) == 'T') && *(tramaRecibida + 1) == ENQ);
   
-                        if(aceptable){
-                            recibirControlCorrecta = true;
-                            devolverControl = ACK;
+                    if(aceptable){
+                        recibirControlCorrecta = true;
+                        devolverControl = ACK;
 
-                            seleccionSondeo = *(aux);
+                        seleccionSondeo = *(tramaRecibida);
 
-                            printf("\n\n\n");
-                            mostrarTramasControl((unsigned char*) aux, 0, 0, 'R');
-                        }else{
-                            devolverControl = NACK;
-                        }
-
-                        //Responder a mestro su ENQ.
-                        enviarTramas = construirTramaControl(*(aux),devolverControl, *(aux+2));
-                        EnviarTramas((char*)enviarTramas,3,MAC_maestro);
-                        mostrarTramasControl(enviarTramas, 0, 0, 'E');
-                           
+                        printf("\n\n\n");
+                        frameB.mostrarTramasControl(tramaRecibida, 0, 0, 'R');
+                    }else{
+                        devolverControl = NACK;
                     }
+
+                    //Responder a mestro su ENQ.
+                    enviarTramas = frameB.tramaControl(*(tramaRecibida),devolverControl, *(tramaRecibida+2));
+                    frameB.limpiarTrama(tramaRecibida);
+
+                    frameB.enviarTrama(enviarTramas,3,MAC_maestro);
+                    frameB.mostrarTramasControl(enviarTramas, 0, 0, 'E');
+                    frameB.limpiarTrama(enviarTramas);                   
+                    
 
                 }
 
@@ -325,15 +335,10 @@ void selector::esclavo(){
         }
     }
 
-char* selector::filtrarTrama(char* const tramaRecibida, int longitud, int &nuevaLongitud, int filtroBajo, int filtroAlto){
-    nuevaLongitud = longitud - (filtroBajo + filtroAlto);
-    return (tramaRecibida+filtroBajo);
-}
+
 
 void selector::ComunicacionProtocolo(unsigned char tipoComunicacion, unsigned char *mac_destino){
     bool emisorOreceptor;
-
-    FrameBuilder FB(interfaz, tipo);
 
     // True = emisor
     // False = receptor
@@ -348,6 +353,7 @@ void selector::ComunicacionProtocolo(unsigned char tipoComunicacion, unsigned ch
 
     char *c = nullptr, *aux = nullptr, caracter;
     unsigned char *tramaEnviar, *tramaControl;
+    unsigned char* tramaRespuesta;
     unsigned char numTrama = '0', BCE, devolverControl;
     int Error, ErrorAcum = 0;
 
@@ -358,15 +364,16 @@ void selector::ComunicacionProtocolo(unsigned char tipoComunicacion, unsigned ch
         //ES EMISOR
 
         //Se carga en un vector string el fichero de datos.
-         vector<string> datosGuardados = cargarDatos("EProtoc.txt");    
+        vector<string> datosGuardados = cargarDatos("EProtoc.txt");    
 
 
         //Repetir hasta enviar la ultima trama del fichero.
+        __fpurge(stdin);
+        
         while(!ultimaTrama){
                 
 
             l = datosGuardados[i].size();
-
             c = new char[l];
             datosGuardados[i].copy(c, l);
 
@@ -377,158 +384,161 @@ void selector::ComunicacionProtocolo(unsigned char tipoComunicacion, unsigned ch
 
 
             //Esperar hasta que el receptor nos haya respondido de forma correcta con ACK.
+            lecturaFallos = true;   //Prepara la posibilidad de fallo para la siguiente trama.
             while(!respondido){
                 
-                Error = 3;  //LeerTeclaEspecial.
+                Error = lector.funcionEspecial();
+                //Que hacer con el error.
+                if(Error == 4){
+                    ErrorAcum++;
+                }
 
 
-                tramaControl = construirTramaControl(tipoComunicacion, STX, numTrama); //CAMBIAR 0 o 1
                 BCE = calcularBCE((unsigned char*)c, l);
-                tramaEnviar = construirTramaDatos(tramaControl, l, (unsigned char*)c, BCE);
+                tramaEnviar = frameB.tramaDatos(tipoComunicacion, STX, numTrama, c, l, BCE);
 
-                if(ErrorAcum > 0){
+                // ------------------------------------------------------------------
+                //                         ZONA DE ERRORES
+                // ------------------------------------------------------------------
+                if(ErrorAcum > 0 && lecturaFallos){
                     printf("\nINTRODUCCIENDO ERROR\n");
-                    *(tramaEnviar+4) = 'ç';   
+                    *(tramaEnviar+4) = 'c';   
                     ErrorAcum--;
+                    lecturaFallos = false;  //Prohibe repetir el mismo fallo para la misma trama.
                 }
                 
-                
-                
-               
+                // ------------------------------------------------------------------
+                //                         ZONA DE ERRORES
+                // ------------------------------------------------------------------
 
-                mostrarTramasControl(tramaEnviar, BCE, 0, 'E');
-                EnviarTramas((char*)tramaEnviar, 5 + l,mac_destino);
-                delete tramaEnviar;
+                //ENVIO
+                frameB.mostrarTramasControl(tramaEnviar, BCE, 0, 'E');
+                frameB.enviarTrama(tramaEnviar, 5+l, mac_destino);
+                frameB.limpiarTrama(tramaEnviar);
 
 
+                //Espera de confirmacion
 
-
-                while(!respondido){                     // A la espera de que me responda.
-                    aux = recibirTrama(longitud);
-                    if(aux != nullptr){
-                        if(*(aux+1) == ACK){
-                            mostrarTramasControl((unsigned char*) aux, 0, 0, 'R');
-                            respondido = true;
-                        }
-                        else if (*(aux+1) == NACK){
-                            mostrarTramasControl((unsigned char*) aux, 0, 0, 'R');
-                            break;
-                        }
-                    }
-                }
+                tramaRespuesta = frameB.esperarTrama(longitud);
+                respondido = (*(tramaRespuesta+1) == ACK);
+                //True si es ACK
+                //False si no es ACK (NACK)
+                       
+                frameB.mostrarTramasControl(tramaRespuesta, 0, 0, 'R');
+                frameB.limpiarTrama(tramaRespuesta);
             }
 
             numTrama = (numTrama == '0') ? '1' : '0';   //Alternar entro 0 o 1
-            delete c;
+            delete[] c;
             respondido = false;
         }
 
         numTrama = '1';         
         printf("\n");
+
+        //FIN COMUNICACION
         while(!recibido){
             
             numTrama = (numTrama == '0') ? '1' : '0';   //Alternar entre 0 o 1
 
-            tramaEnviar = construirTramaControl(tipoComunicacion, EOT, numTrama);
-            mostrarTramasControl(tramaEnviar, 0, 0, 'E');
+            tramaEnviar = frameB.tramaControl(tipoComunicacion, EOT, numTrama);
+            frameB.mostrarTramasControl(tramaEnviar, 0, 0, 'E');
+            frameB.enviarTrama(tramaEnviar,3,mac_destino);
+            frameB.limpiarTrama(tramaEnviar);
+           
 
-            EnviarTramas((char*)tramaEnviar,3,mac_destino);
-            delete tramaEnviar;
+            tramaRespuesta = frameB.esperarTrama(longitud);
+            recibido = (*(tramaRespuesta+1)== ACK);
+            frameB.mostrarTramasControl(tramaRespuesta, 0, 0, 'R');
+            frameB.limpiarTrama(tramaRespuesta);
 
-            recibido = false;
-            while(!recibido){
-                aux = recibirTrama(longitud);
-                if(aux != nullptr){
-                    if(*(aux+1) == ACK){
-                        recibido = true;
-                        mostrarTramasControl((unsigned char*) aux, 0, 0, 'R');
-                    }
-                    else if(*(aux+1) == NACK){
-                        mostrarTramasControl((unsigned char*) aux, 0, 0, 'R');
-                        break;
-                    }
-                }
-            }
         }
+
+
+
     }else{      // receptor de la comunicacion
         bool recibirFinal = false;
         int tamDatos = 0, nuevaLongitud = 0;
         unsigned char BCEcalculado = ' ';
-        char* tramaFiltrada = nullptr;
+        string datosFiltrados;
 
-        vector<char*> datosGuardados;
+        vector<string> datosGuardados;
         vector<int> vSize;
 
         while(!recibirFinal){
+            tramaRespuesta = frameB.esperarTrama(longitud);
+    
 
-            aux = recibirTrama(longitud);
-            if(aux != nullptr){
+            if(*(tramaRespuesta+1)==STX) { //Debe ser STX
+                tamDatos = *(tramaRespuesta + 3);  
+                BCEcalculado = calcularBCE((tramaRespuesta+4), tamDatos);
 
-                if(*(aux+1)==STX) { //Debe ser STX
-                    tamDatos = (unsigned char) *(aux + 3);  // Casting a unsigned char transformando el posible valor negativo a positivo (-1 => FF = 255).
-                    BCEcalculado = calcularBCE((unsigned char*)aux+4, tamDatos);
-                    mostrarTramasControl((unsigned char*)aux, BCEcalculado, (unsigned char)aux[longitud-1], 'R');
-                    if(BCEcalculado == (unsigned char) *(aux+longitud-1)){                   
-                        tramaFiltrada = filtrarTrama(aux, longitud, nuevaLongitud, 4, 1);
+                frameB.mostrarTramasControl(tramaRespuesta, BCEcalculado, tramaRespuesta[longitud-1], 'R');
 
-                        datosGuardados.push_back(tramaFiltrada);      // Datos a guardar en el fichero
-                        vSize.push_back(nuevaLongitud);
+                if(BCEcalculado == (unsigned char) *(tramaRespuesta+longitud-1)){      
 
-                        devolverControl = ACK;
-                    }else{ 
-                        devolverControl = NACK;
-                    }
+                   datosFiltrados = frameB.filtrarTrama(tramaRespuesta, longitud, nuevaLongitud, 4, 1);
+                
+                   datosGuardados.push_back(datosFiltrados);      // Datos a guardar en el fichero
+                   //vSize.push_back(nuevaLongitud);
 
-                    tramaEnviar = construirTramaControl(tipoComunicacion, devolverControl, *(aux+2));
-                    EnviarTramas((char*)tramaEnviar,3,mac_destino);
-                    mostrarTramasControl(tramaEnviar, 0, 0, 'E');
+                    devolverControl = ACK;
+                }else{ 
+                    devolverControl = NACK;
+                }
+                
 
-                    delete tramaEnviar;
+                tramaEnviar = frameB.tramaControl(tipoComunicacion, devolverControl, *(tramaRespuesta+2));
+                frameB.enviarTrama(tramaEnviar,3,mac_destino);
+                frameB.mostrarTramasControl(tramaEnviar, 0, 0, 'E');
 
-                }else if(*(aux+1)==EOT){
-                    unsigned char respuestaConfirmada = ACK; 
-                    recibirFinal = true;
-                    printf("\n");
-                    mostrarTramasControl((unsigned char*) aux, 0, 0, 'R');
 
-                    if(estado == 1){        // Modo maestro, esto se encarga de determinar si el maestro acepta cerrar la
-                        int opc = 0;        // comunicacion en sondeo (T)
+            }else if(*(tramaRespuesta+1)==EOT){
 
-                        __fpurge(stdin);
-                        cout<<"Acepta el cierre de la comunicacion: \n [1] Si. \n [2] No.\nOpcion: ";
-                        while(opc < 1 || opc > 2){
-                            if(kbhit()){
-                                opc= getch()-48;
+                __fpurge(stdin);
+                unsigned char respuestaConfirmada = ACK; 
+                recibirFinal = true;
+                printf("\n");
+
+                frameB.mostrarTramasControl((unsigned char*) tramaRespuesta, 0, 0, 'R');
+                if(estado == 1){        // Modo maestro, esto se encarga de determinar si el maestro acepta cerrar la
+                    int opc = 0;        // comunicacion en sondeo (T)
+
+                    
+                    cout<<"Acepta el cierre de la comunicacion: \n [1] Si. \n [2] No.\nOpcion: ";
+                    while(opc < 1 || opc > 2){
+                        if(kbhit()){
+                            opc = getch()-48;
                                 
-                            }
                         }
-                        __fpurge(stdin);
-
-                        if(opc == 1){
-                            respuestaConfirmada = ACK; 
-                             
-                        }
-
-                        else if (opc == 2){
-                            respuestaConfirmada = NACK;
-                            recibirFinal = false;
-                        }
-                        printf("\n");
                     }
+                    
 
-                    //Enviar respuesta de cierre.
-                    tramaEnviar = construirTramaControl(tipoComunicacion, respuestaConfirmada, *(aux+2));
+                    if(opc == 1){
+                        respuestaConfirmada = ACK; 
+                         
+                    }
+                    else if (opc == 2){
+                        respuestaConfirmada = NACK;
+                        recibirFinal = false;
+                    }
+                    printf("\n");
+                }
 
-                    EnviarTramas((char*)tramaEnviar,3,mac_destino);
-                    mostrarTramasControl(tramaEnviar, 0, 0, 'E');
+                //Enviar respuesta de cierre.
+                tramaEnviar = frameB.tramaControl(tipoComunicacion, respuestaConfirmada, *(tramaRespuesta+2));
 
-                    delete tramaEnviar;
-                }          
-            }
+                frameB.enviarTrama(tramaEnviar,3,mac_destino);
+                frameB.mostrarTramasControl(tramaEnviar, 0, 0, 'E');
+
+            }  
+            
+            frameB.limpiarTrama(tramaRespuesta);
+            frameB.limpiarTrama(tramaEnviar);        
         }
         
         //Guardar en fichero.
-        volcarDatos(datosGuardados, vSize, "RProtoc.txt");
+        volcarDatos(datosGuardados, "RProtoc.txt");
     }
 }
   
@@ -573,7 +583,7 @@ vector<string> selector::cargarDatos(string nombreFichero){
         return v;
     }
 
-void selector::volcarDatos(vector<char*> datosGuardados, vector<int> vSize, string nombreFichero){
+void selector::volcarDatos(vector<string> datosGuardados, string nombreFichero){
 
     ofstream file;
     file.open(nombreFichero);
@@ -584,7 +594,8 @@ void selector::volcarDatos(vector<char*> datosGuardados, vector<int> vSize, stri
 
         for(int i=0; i<datosGuardados.size(); i++)
         {
-            file.write(datosGuardados[i], vSize[i]);
+            file << datosGuardados[i];
+            
         }
 
         file.close();
@@ -604,67 +615,19 @@ void selector::seleccionarInterfaz(pcap_if *listaInterfaz, unsigned int max){
 
             setDeviceName(aux, listaInterfaz[interface].name);
             std::cout<<aux->deviceName<<std::endl;
-            std::cout<<"La MAC es: ";
+           
 
             GetMACAdapter(aux);
 
             interfaz = *aux;
+            frameB = FrameBuilder(&interfaz);
 
+            std::cout<<"La MAC es: ";
             mostrarMAC(aux->MACaddr);   
             printf("\n");     
         }
 
 
-    }
-   
-void selector::EnviarTramas(char* car, int size, unsigned char* mac_dst){
-        unsigned char* dato;
-        dato = (unsigned char*) car;
-
-        unsigned char* trama = BuildFrame(interfaz.MACaddr, mac_dst, tipo, dato);
-        SendFrame(&interfaz, trama, size);   // No usar sizeof(unsigned char) aunque sea igual a 1;
-
-        free (trama);
-    }
-
-char* selector::recibirTrama(int& longitud){
-        
-        apacket_t p = ReceiveFrame(&interfaz);
-        const unsigned char* data = p.packet;
-        longitud = 0;
-        unsigned int contador = 0;
-
-        char* datos = nullptr;
-
-        if(data != nullptr){
-            if(*(data+12) == tipo[0] && *(data+13) == 0x00){        // Si es nuestro tipo de protocolo y es 0x00 (ya se ha conectado)
-
-                int size = p.header.len-14;                 // Se ignora la macOrigen, macDestino, protocolo, etc.
-                
-                
-                if(size == 46){                             // Ethernet rellena el campo de datos con 46 bytes por defecto, si se envian mas de 46 no hay ceros (el elemento de fin de campo de datos) que detectar.            
-                    while(*(data+14+contador) != 0x00 && contador < 46){     // Si se han enviado menos de 46 bytes o menos tiene que haber algún cero puesto por defecto.
-                        contador++;                                          // Se comprueba que se hagan 46 iteraciones máximo para este caso evitando un bucle indefinido.
-                    }
-                    if(contador == 0){
-                        return nullptr;
-                    }
-                }else{
-                    contador = size;
-                }
-
-                datos = new char[contador];
-                for(int i=0; i<contador; i++){       // Los 14 bytes son de la MAC_maestro, mac_destino, el protocolo... menos el campo de datos.
-                    datos[i] = *(data+14+i);
-                }
-
-                
-            }
-        }
-
-
-        longitud = contador;
-        return datos;    
     }
 
 selector::selector(){
@@ -673,6 +636,7 @@ selector::selector(){
         MAC_esclavo = new unsigned char [6];
         MAC_maestro  = new unsigned char [6];
         estado = 0;     //valor por defecto, no influye pues se va a modificar.
+        lector = LectorEntrada();
     };
 
 void selector::mostrarInterfaces(){

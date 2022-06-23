@@ -6,6 +6,7 @@
 
 #include <stdio_ext.h>
 #include "selector.h"
+#include <iostream>
 
 //using namespace std;
 
@@ -13,6 +14,7 @@ int main()
 {
 
   //Creación de la clase selectora.
+  
   selector S;
   
 
@@ -22,6 +24,6 @@ int main()
 
   //Una vez seleccionada una interfaz, escoger el grupo y tipo de funcionamiento que seguirá.
   S.establecerComunicacion();
-
+  std::cout<<std::endl<<std::endl;
   return 0;
 }

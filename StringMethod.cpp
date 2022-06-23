@@ -25,7 +25,7 @@ int StringMethod::getSizeArray(TDD* array){
 }
 
 template <class TDD>
-void StringMethod::copiarArrays(TDD* arrayOrigen, TDD*& arrayDestino){
+void StringMethod::copiarArrays(TDD* arrayOrigen, TDD* arrayDestino){
 
     if(arrayOrigen == nullptr){                 // No existe el array desde donde se copiará la información -> No se hace nada.
         return;
@@ -42,7 +42,7 @@ void StringMethod::copiarArrays(TDD* arrayOrigen, TDD*& arrayDestino){
 }
 
 template <class TDD>
-void StringMethod::copiarArrays(TDD* arrayOrigen, TDD*& arrayDestino, int sizeArrayOrigen){
+void StringMethod::copiarArrays(TDD* arrayOrigen, TDD* arrayDestino, int sizeArrayOrigen){
 
     if(arrayOrigen == nullptr){                 // No existe el array desde donde se copiará la información -> No se hace nada.
         return;
@@ -57,7 +57,7 @@ void StringMethod::copiarArrays(TDD* arrayOrigen, TDD*& arrayDestino, int sizeAr
 }
 
 template <class TDD>
-void StringMethod::concatenarArrays(TDD* arrayOrigen, TDD*& arrayDestino){
+void StringMethod::concatenarArrays(TDD* arrayOrigen, TDD* arrayDestino){
 
    // No existe el array desde donde se copiará la información -> No se hace nada.
    if(arrayOrigen == nullptr){
@@ -88,7 +88,7 @@ void StringMethod::concatenarArrays(TDD* arrayOrigen, TDD*& arrayDestino){
 }
 
 template <class TDD>
-void StringMethod::concatenarArrays(TDD* arrayOrigen, TDD*& arrayDestino, int sizeArrayOrigen, int sizeArrayDestino){
+void StringMethod::concatenarArrays(TDD* arrayOrigen, TDD* arrayDestino, int sizeArrayOrigen, int sizeArrayDestino){
 
    // No existe el array desde donde se copiará la información -> No se hace nada.
    if(arrayOrigen == nullptr){
@@ -119,10 +119,10 @@ void StringMethod::concatenarArrays(TDD* arrayOrigen, TDD*& arrayDestino, int si
 }
 
 template <class TDD>
-void StringMethod::insertarEnArray(TDD*& arrayDestino, TDD* characteres, int pos){
+void StringMethod::insertarEnArray(TDD* arrayDestino, TDD* characteres, int pos){
 
     // No existe el array desde donde se copiará la información -> No se hace nada.
-    if(arrayOrigen == nullptr){
+    if(characteres == nullptr){
         return;
     }
 
@@ -160,7 +160,7 @@ void StringMethod::insertarEnArray(TDD*& arrayDestino, TDD* characteres, int pos
 
         // Se insertan el resto de caracteres a partir de la posicion "pos" (los caracteres que faltan)
         for(int j=pos; j<sizeArrayDestino; i++, j++){
-            aux[i] = arrayDestino[i];
+            aux[i] = arrayDestino[j];
         }
 
         copiarArrays(aux, arrayDestino);
@@ -168,10 +168,10 @@ void StringMethod::insertarEnArray(TDD*& arrayDestino, TDD* characteres, int pos
 }
 
 template <class TDD>
-void StringMethod::insertarEnArray(TDD*& arrayDestino, TDD* characteres, int pos, int sizeArrayDestino, int sizeCharacters){
+void StringMethod::insertarEnArray(TDD* arrayDestino, TDD* characteres, int pos, int sizeArrayDestino, int sizeCharacters){
 
     // No existe el array desde donde se copiará la información -> No se hace nada.
-    if(arrayOrigen == nullptr){
+    if(characteres == nullptr){
         return;
     }
 	
@@ -207,7 +207,7 @@ void StringMethod::insertarEnArray(TDD*& arrayDestino, TDD* characteres, int pos
 
         // Se insertan el resto de caracteres a partir de la posicion "pos" (los caracteres que faltan)
         for(int j=pos; j<sizeArrayDestino; i++, j++){
-            aux[i] = arrayDestino[i];
+            aux[i] = arrayDestino[j];
         }
 
         copiarArrays(aux, arrayDestino, totalSize);
@@ -224,7 +224,7 @@ void StringMethod::copiarCharAString(string& cad, char* c, int size)
     cad.copy(c, size);
 }
 
-void StringMethod::copiarStringAChar(char*& c, string cad){
+void StringMethod::copiarStringAChar(char* c, string cad){
 
 	int l = cad.size();
 
